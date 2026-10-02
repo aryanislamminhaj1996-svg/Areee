@@ -13,7 +13,19 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-connectDB();
+connectDB().then(async () => {
+  try {
+    const Admin = require('./models/Admin');
+    const phone = process.env.ADMIN_PHONE;
+    const password = process.env.ADMIN_PASSWORD;
+    if (phone && password && !(await Admin.findOne({ phone }))) {
+      await Admin.create({ name: process.env.ADMIN_NAME || 'Admin', phone, password });
+      console.log('✅ অ্যাডমিন তৈরি হয়েছে');
+    }
+  } catch (e) {
+    console.error('অ্যাডমিন তৈরি ব্যর্থ:', e.message);
+  }
+});
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/products', require('./routes/products'));
