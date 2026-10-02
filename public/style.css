@@ -388,7 +388,7 @@ html[data-theme="dark"] .form-badge { background: #1c2422; }
 .banner-slide { position: relative; flex: 0 0 100%; width: 100%; scroll-snap-align: start; display: block; color: inherit; text-decoration: none; }
 .banner-carousel .banner-img {
   width: 100%; border-radius: var(--radius); display: block;
-  aspect-ratio: 16/7; object-fit: cover;
+  aspect-ratio: 16/9; object-fit: cover;
 }
 .banner-cta {
   position: absolute; right: 14px; bottom: 14px; background: var(--green-dark); color: #fff;
