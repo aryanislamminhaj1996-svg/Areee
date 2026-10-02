@@ -5,6 +5,21 @@ const { adminAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Search: every word typed must appear somewhere in the name / company / description
+// (any order, case-insensitive). "bilastine 20" therefore finds "Bilastine-20", "Bilastin 20 mg" etc.
+function searchConditions(q) {
+  const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(q)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((w) => {
+      const rx = { $regex: escapeRe(w), $options: 'i' };
+      return { $or: [{ name: rx }, { companyName: rx }, { description: rx }] };
+    });
+}
+
 // GET /api/products  -> public list (active only), supports ?q= &category= &company= &page= &limit=
 // page/limit are optional — omitting them preserves the old "return everything" behavior
 // for callers that need the full catalog (e.g. shop homepage's curated sections).
@@ -15,10 +30,7 @@ router.get('/', async (req, res) => {
     if (!ids) filter.inStock = true; // browsing/search hides out-of-stock; direct id lookups (cart, recently-purchased) still resolve so the UI can show their actual state
     if (category) filter.category = category;
     if (company) filter.company = company;
-    if (q) {
-      const safe = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = [{ name: { $regex: safe, $options: 'i' } }, { companyName: { $regex: safe, $options: 'i' } }];
-    }
+    if (q) filter.$and = searchConditions(q);
     if (ids) filter._id = { $in: String(ids).split(',').filter(Boolean) };
     let query = Product.find(filter).sort({ createdAt: -1 }).lean();
     let total;
@@ -98,13 +110,10 @@ router.get('/admin', adminAuth, async (req, res) => {
   try {
     const { q, page, limit, inStock, noImage, exclude } = req.query;
     const filter = {};
-    if (q) {
-      const safe = String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = [{ name: { $regex: safe, $options: 'i' } }, { companyName: { $regex: safe, $options: 'i' } }];
-    }
+    if (q) filter.$and = searchConditions(q);
     if (inStock === 'true') filter.inStock = true;
     if (inStock === 'false') filter.inStock = false;
-    if (noImage === 'true') filter.$and = [{ $or: [{ image: '' }, { image: { $exists: false } }] }];
+    if (noImage === 'true') filter.$and = (filter.$and || []).concat([{ $or: [{ image: '' }, { image: { $exists: false } }] }]);
     if (exclude) filter._id = { $nin: String(exclude).split(',').filter(Boolean) };
 
     const lim = Math.min(Number(limit) || 50, 100);
