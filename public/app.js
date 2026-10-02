@@ -686,7 +686,9 @@ function renderShop(newestBatch, deals, announcements, recentlyPurchased, active
   // to avoid the confusion of two separate banner lists competing to show.
   const activeBanners = (state.settings.landingBanners || []).filter((b) => b.active);
 
+  const searching = query ? 'display:none;' : '';
   APP.innerHTML = `
+    <div id="homeTop" style="${searching}">
     ${announcements.length ? `
       <div class="announce-ticker">
         <div class="announce-ticker-track" style="animation-duration:${Math.max(18, announcements.reduce((s, a) => s + a.title.length + a.message.length, 0) * 0.28)}s;">
@@ -721,16 +723,18 @@ function renderShop(newestBatch, deals, announcements, recentlyPurchased, active
         `).join('')}
       </div>
     ` : ''}
+    </div>
     <div class="search-bar">
       <input type="text" id="searchInput" placeholder="${t('search_placeholder')}" value="${escapeHtml(query)}">
     </div>
 
+    <div id="homeMid" style="${searching}">
     ${state.companies.length ? `
       <div class="section-head"><div class="section-title" style="margin:0;">${t('popular_companies')}</div></div>
-      <div class="company-strip">
-        <div class="company-strip-track" style="animation-duration:${Math.max(16, state.companies.length * 3.2)}s;">
+      <div class="company-strip" style="${state.companies.length >= 8 ? '' : 'overflow-x:auto;'}">
+        <div class="company-strip-track" style="${state.companies.length >= 8 ? `animation-duration:${Math.max(16, state.companies.length * 3.2)}s;` : 'animation:none;'}">
           ${state.companies.map(companyChip).join('')}
-          ${state.companies.map(companyChip).join('')}
+          ${state.companies.length >= 8 ? state.companies.map(companyChip).join('') : ''}
         </div>
       </div>
     ` : ''}
@@ -740,6 +744,7 @@ function renderShop(newestBatch, deals, announcements, recentlyPurchased, active
     ${specialOffer.length ? productSection(t('special_offer'), specialOffer) : ''}
     ${flashSale.length ? productSection(t('flash_sale'), flashSale) : ''}
 
+    </div>
     <div class="section-head"><div class="section-title" style="margin:0;">${t('all_products')}</div><a href="#/products" class="see-more">${t('see_more')}</a></div>
     <div class="category-chips" id="chips">
       <div class="chip ${!activeCategory ? 'active' : ''}" data-cat="">${t('all')}</div>
@@ -769,6 +774,14 @@ function renderShop(newestBatch, deals, announcements, recentlyPurchased, active
     const res = query || activeCategory ? await api(`/products?${params.toString()}`, { auth: false }) : { items: newestBatch };
     previewItems = res.items;
     cacheProducts(previewItems);
+    // While searching, hide the banner/offer sections so the results sit right under
+    // the search box (otherwise they end up far below, hidden behind the keyboard).
+    const hideSections = query ? 'none' : '';
+    ['homeTop', 'homeMid'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = hideSections;
+    });
+    if (query) window.scrollTo(0, 0);
     document.getElementById('productGrid').innerHTML = previewItems.length
       ? previewItems.map((p) => productCard(p)).join('')
       : `<div class="empty-state" style="grid-column:1/-1;">${t('no_products')}</div>`;
