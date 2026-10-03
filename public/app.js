@@ -2494,7 +2494,11 @@ function openProductForm(product, companies, box, onDone) {
       </div>
     </div>
   `;
+  // Only ever one product form on screen: opening a new one (edit or add) replaces
+  // any form that is already open, instead of stacking them (duplicate field ids too).
+  document.querySelectorAll('#productFormCard').forEach((el) => el.remove());
   box.insertAdjacentHTML('afterbegin', formHtml);
+  document.getElementById('productFormCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   document.getElementById('f_imageFile').addEventListener('change', (e) => {
     const file = e.target.files[0];
