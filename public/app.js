@@ -2448,7 +2448,21 @@ async function renderAdminProducts(box, outOfStockOnly = false) {
           renderBody();
         } catch (err) { toast(err.message); }
       } else if (e.target.classList.contains('editBtn')) {
-        openProductForm(product, companies, box);
+        openProductForm(product, companies, box, (saved) => {
+          if (!saved) return;
+          const belongsHere = outOfStockOnly ? !saved.inStock : saved.inStock;
+          const rowEl = document.querySelector(`#productTableBody tr[data-id="${id}"]`);
+          if (belongsHere) {
+            const idx = pageState.items.findIndex((p) => p._id === id);
+            if (idx > -1) pageState.items[idx] = saved;
+            if (rowEl) rowEl.outerHTML = productRow(saved);
+          } else {
+            pageState.items = pageState.items.filter((p) => p._id !== id);
+            if (rowEl) rowEl.remove();
+            if (!pageState.items.length) document.getElementById('productTableBody').innerHTML = emptyRow();
+            toast(saved.inStock ? t('toast_back_in_stock') : t('toast_moved_to_stockout'));
+          }
+        });
       } else if (e.target.classList.contains('copyLinkBtn')) {
         const link = `${location.origin}/#/product/${id}`;
         try {
@@ -2476,7 +2490,10 @@ function openProductForm(product, companies, box, onDone) {
   const isEdit = !!product;
   const formHtml = `
     <div class="card" style="border:1.5px solid #0d9488;" id="productFormCard">
-      <div class="section-title">${isEdit ? 'প্রোডাক্ট সম্পাদনা' : 'নতুন প্রোডাক্ট'}</div>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <div class="section-title" style="margin-bottom:8px;">${isEdit ? 'প্রোডাক্ট সম্পাদনা' : 'নতুন প্রোডাক্ট'}</div>
+        <button class="btn btn-outline btn-sm" id="closeProductModal" aria-label="বন্ধ করুন">✕</button>
+      </div>
       ${!isEdit ? `<div class="muted" style="font-size:12px; margin-top:-8px; margin-bottom:6px;">একটার পর একটা সেভ করলে ফর্মটা খোলাই থাকবে, বারবার খুলতে হবে না। শেষ হলে "বাতিল" চাপুন।</div>` : ''}
       <label>নাম</label><input id="f_name" value="${isEdit ? escapeHtml(product.name) : ''}">
       <label>কোম্পানি</label>
@@ -2504,11 +2521,32 @@ function openProductForm(product, companies, box, onDone) {
       </div>
     </div>
   `;
-  // Only ever one product form on screen: opening a new one (edit or add) replaces
-  // any form that is already open, instead of stacking them (duplicate field ids too).
-  document.querySelectorAll('#productFormCard').forEach((el) => el.remove());
-  box.insertAdjacentHTML('afterbegin', formHtml);
-  document.getElementById('productFormCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // The form opens as a popup over the page, so the list underneath keeps its scroll
+  // position. Only one popup can exist at a time.
+  document.querySelectorAll('#productModal').forEach((el) => el.remove());
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-overlay" id="productModal"><div class="modal-box">${formHtml}</div></div>`);
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  let addedAny = false;
+  function onKey(e) { if (e.key === 'Escape') closeModal(); }
+  function closeModal() {
+    const m = document.getElementById('productModal');
+    if (m) m.remove();
+    document.body.style.overflow = prevOverflow;
+    document.removeEventListener('keydown', onKey);
+    window.removeEventListener('hashchange', closeModal);
+  }
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('hashchange', closeModal);
+  // Close the popup, refresh the list behind it, and put the page back where it was.
+  async function finish(saved) {
+    const y = window.scrollY;
+    closeModal();
+    await done(saved);
+    window.scrollTo(0, y);
+  }
+  const cancelOrClose = () => { if (!isEdit && addedAny) finish(); else closeModal(); };
+  document.getElementById('closeProductModal').addEventListener('click', cancelOrClose);
 
   document.getElementById('f_imageFile').addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -2538,7 +2576,7 @@ function openProductForm(product, companies, box, onDone) {
   document.getElementById('f_mrp').addEventListener('input', recalcPrice);
   document.getElementById('f_discount').addEventListener('input', recalcPrice);
 
-  document.getElementById('cancelProductBtn').addEventListener('click', () => done());
+  document.getElementById('cancelProductBtn').addEventListener('click', cancelOrClose);
   document.getElementById('saveProductBtn').addEventListener('click', async () => {
     const companyEl = document.getElementById('f_company');
     const payload = {
@@ -2563,7 +2601,8 @@ function openProductForm(product, companies, box, onDone) {
         payload.image = await uploadImage(file, 'products');
       }
       saveBtn.textContent = 'সংরক্ষণ হচ্ছে...';
-      if (isEdit) await api(`/products/${product._id}`, { method: 'PUT', body: payload });
+      let savedProduct = null;
+      if (isEdit) savedProduct = await api(`/products/${product._id}`, { method: 'PUT', body: payload });
       else await api('/products', { method: 'POST', body: payload });
       lastUsedCategory = payload.category || '';
       lastUsedCompanyId = companyEl.value || '';
@@ -2571,8 +2610,9 @@ function openProductForm(product, companies, box, onDone) {
 
       if (isEdit) {
         toast('সংরক্ষণ হয়েছে');
-        done();
+        finish(savedProduct);
       } else {
+        addedAny = true;
         toast('✅ প্রোডাক্ট যোগ হয়েছে — পরেরটা লিখুন');
         // Keep the form open for fast back-to-back entry: clear only the
         // per-product fields, keep company/category/unit as they were.

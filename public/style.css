@@ -686,3 +686,12 @@ html[data-theme="dark"] .day-folder { border-color: #2a332f; }
   .container { max-width: 100%; padding: 0; }
   .invoice-box .card { box-shadow: none; border: none; padding: 0; }
 }
+
+/* --- Popup (modal) used for the product add/edit form --- */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.5);
+  display: flex; align-items: flex-start; justify-content: center;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px;
+}
+.modal-box { width: 100%; max-width: 520px; margin: auto 0; }
+.modal-box .card { margin: 0; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
