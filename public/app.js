@@ -1738,7 +1738,10 @@ route('/admin-login', async () => {
 /* ================= ADMIN DASHBOARD ================= */
 route('/admin', async () => {
   requireAdmin();
-  renderAdminShell('dashboard');
+  // Come back to the tab the admin was on (e.g. after a refresh) instead of always the dashboard.
+  let saved = null;
+  try { saved = localStorage.getItem('og_admin_tab'); } catch (e) { /* ignore */ }
+  renderAdminShell(flattenAdminNav().some((m) => m.tab === saved) ? saved : 'dashboard');
 });
 
 const ADMIN_NAV = [
@@ -1769,8 +1772,14 @@ function flattenAdminNav() {
   ADMIN_NAV.forEach((entry) => (entry.group ? entry.items.forEach((it) => flat.push(it)) : flat.push(entry)));
   return flat;
 }
+function syncTopbarHeight() {
+  const gtb = document.querySelector('.topbar');
+  document.documentElement.style.setProperty('--topbar-h', `${gtb ? gtb.offsetHeight : 0}px`);
+}
+window.addEventListener('resize', syncTopbarHeight);
 function renderAdminShell(activeTab) {
   APP.classList.add('admin-active');
+  syncTopbarHeight();
   const allItems = flattenAdminNav();
   const activeItem = allItems.find((m) => m.tab === activeTab) || allItems[0];
 
@@ -1836,6 +1845,7 @@ function renderAdminShell(activeTab) {
 async function loadAdminTab(tab, opts = {}) {
   const allItems = flattenAdminNav();
   const matched = allItems.find((m) => m.tab === tab);
+  if (matched) { try { localStorage.setItem('og_admin_tab', tab); } catch (e) { /* ignore */ } }
   document.querySelectorAll('#adminNav .admin-nav-item').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
   const titleEl = document.getElementById('adminPageTitle');
   if (matched && titleEl) titleEl.textContent = matched.label();
