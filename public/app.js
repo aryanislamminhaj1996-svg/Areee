@@ -541,7 +541,7 @@ function cldResize(url, width) {
 function escapeHtml(str = '') {
   return String(str).replace(/[&<>"']/g, (m) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
 }
-function money(n) { return `৳${Number(n).toLocaleString('bn-BD')}`; }
+function money(n) { return `৳${Number(n).toLocaleString('bn-BD', { maximumFractionDigits: 2 })}`; }
 
 /* ---------- Group a list of orders (already sorted newest-first) by day,
  * so admin/customer order lists show "আজ / গতকাল / তারিখ" section headers
@@ -669,7 +669,8 @@ route('/shop', async () => {
 });
 
 function discountOf(p) {
-  return p.mrp > p.price ? Math.round(((p.mrp - p.price) / p.mrp) * 100) : 0;
+  // one decimal place, so 13.5% shows as 13.5 (and 20% still shows as 20)
+  return p.mrp > p.price ? Math.round(((p.mrp - p.price) / p.mrp) * 1000) / 10 : 0;
 }
 
 function renderShop(newestBatch, deals, announcements, recentlyPurchased, activeCategory = '', query = '') {
@@ -1436,7 +1437,7 @@ function renderInvoice(o, settings) {
             ${rows.map((it, i) => {
               const mrp = Number(it.mrp) || 0;
               const hasDiscount = mrp > it.price;
-              const discPct = hasDiscount ? Math.round(((mrp - it.price) / mrp) * 100) : 0;
+              const discPct = hasDiscount ? Math.round(((mrp - it.price) / mrp) * 1000) / 10 : 0;
               const formLabel = detectFormLabel(it);
               return `
               <tr>
@@ -2508,9 +2509,9 @@ function openProductForm(product, companies, box, onDone) {
         <option value="">-- নির্বাচন করুন (না দিলে নাম দেখে অনুমান হবে) --</option>
         ${Object.keys(FORM_LABELS).map((k) => `<option value="${k}" ${isEdit && product.form === k ? 'selected' : ''}>${FORM_LABELS[k].icon} ${k}</option>`).join('')}
       </select>
-      <label>এমআরপি (MRP)</label><input id="f_mrp" type="number" value="${isEdit ? product.mrp : ''}">
-      <label>পাইকারি ছাড় (%)</label><input id="f_discount" type="number" placeholder="যেমন: 20" value="${isEdit && product.mrp > 0 ? Math.round(((product.mrp - product.price) / product.mrp) * 100) : ''}">
-      <label>পাইকারি মূল্য (স্বয়ংক্রিয়, চাইলে বদলাতে পারবেন)</label><input id="f_price" type="number" value="${isEdit ? product.price : ''}">
+      <label>এমআরপি (MRP)</label><input id="f_mrp" type="number" step="any" inputmode="decimal" value="${isEdit ? product.mrp : ''}">
+      <label>পাইকারি ছাড় (%)</label><input id="f_discount" type="number" step="any" inputmode="decimal" placeholder="যেমন: 20 বা 13.5" value="${isEdit && product.mrp > 0 ? Math.round(((product.mrp - product.price) / product.mrp) * 1000) / 10 : ''}">
+      <label>পাইকারি মূল্য (স্বয়ংক্রিয়, চাইলে বদলাতে পারবেন)</label><input id="f_price" type="number" step="any" inputmode="decimal" value="${isEdit ? product.price : ''}">
       <label>স্টক</label><input id="f_stock" type="number" value="${isEdit ? product.stock : 0}">
       <label>প্রোডাক্টের ছবি</label>
       ${isEdit && product.image ? `<img src="${product.image}" class="img-preview" id="f_imagePreview">` : ''}
@@ -2569,7 +2570,7 @@ function openProductForm(product, companies, box, onDone) {
     const mrp = Number(document.getElementById('f_mrp').value) || 0;
     const discount = Number(document.getElementById('f_discount').value) || 0;
     if (mrp > 0 && discount > 0) {
-      const price = Math.round(mrp - (mrp * discount) / 100);
+      const price = Math.round((mrp - (mrp * discount) / 100) * 100) / 100;
       document.getElementById('f_price').value = price;
     }
   }
@@ -3213,11 +3214,12 @@ async function renderAdminAnnouncements(box) {
     `).join('')}
   `;
   document.getElementById('addAnnounceBtn').addEventListener('click', async () => {
+    const anTitle = document.getElementById('an_title').value.trim();
+    const anMessage = document.getElementById('an_message').value.trim();
+    if (!anTitle || !anMessage) return toast('শিরোনাম ও বার্তা দুটোই লিখুন');
     try {
-      await api('/announcements', {
-        method: 'POST',
-        body: { title: document.getElementById('an_title').value, message: document.getElementById('an_message').value },
-      });
+      await api('/announcements', { method: 'POST', body: { title: anTitle, message: anMessage } });
+      toast('✅ নোটিস যোগ হয়েছে');
       renderAdminAnnouncements(box);
     } catch (err) { toast(err.message); }
   });
