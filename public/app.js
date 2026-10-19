@@ -916,6 +916,8 @@ async function renderProductsList(activeCategory = '', query = '', companyId = '
       : `<div class="empty-state" style="grid-column:1/-1;">${t('no_products')}</div>`;
   }
 
+  syncTopbarHeight();
+  requestAnimationFrame(syncTopbarHeight);
   APP.innerHTML = `
     <div class="section-head">
       <div class="section-title" style="margin:0;">${t('all_products_page')}</div>
@@ -929,7 +931,7 @@ async function renderProductsList(activeCategory = '', query = '', companyId = '
         🏢 ${escapeHtml(activeCompany.name)} <span id="clearCompanyFilter">✕</span>
       </div>
     ` : ''}
-    <div class="search-bar">
+    <div class="search-bar search-sticky">
       <input type="text" id="searchInput" placeholder="${t('search_placeholder')}" value="${escapeHtml(query)}">
     </div>
     <div class="category-chips" id="chips">

@@ -184,6 +184,12 @@ html[data-theme="dark"] textarea:focus {
 /* --- Product grid --- */
 .search-bar { display: flex; gap: 8px; margin-bottom: 14px; }
 .search-bar input { flex: 1; }
+/* All Products page: the search box stays pinned just under the site header while scrolling */
+.search-sticky {
+  position: sticky; top: var(--topbar-h, 60px); z-index: 20;
+  background: var(--bg);
+  margin: 0 -16px 6px; padding: 8px 16px;
+}
 .category-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 6px; }
 .chip {
   flex-shrink: 0; padding: 7px 14px; border-radius: var(--radius-sm); background: var(--card);
