@@ -678,6 +678,11 @@ html[data-theme="dark"] .day-folder { border-color: #2a332f; }
 
 .invoice-footer-row { display: flex; justify-content: space-between; margin-top: 46px; font-size: 13.5px; }
 
+.invoice-notice {
+  margin-top: 22px; padding: 10px 12px; border: 1px dashed #222; border-radius: 6px;
+  font-size: 13px; line-height: 1.65; text-align: center; color: #111;
+}
+
 .no-print { }
 
 @media print {
