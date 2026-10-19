@@ -491,10 +491,46 @@ document.getElementById('adminViewSwitch').addEventListener('click', (e) => {
   if (!btn) return;
   location.hash = btn.dataset.mode === 'admin' ? '#/admin' : '#/shop';
 });
+/* ---------- "App closed" notice (shown to customers when the admin turns the app off) ---------- */
+let lastStatusFetch = 0;
+async function refreshAppStatus(force = false) {
+  if (!force && Date.now() - lastStatusFetch < 30000) return;
+  lastStatusFetch = Date.now();
+  state.settings = await api('/settings', { auth: false });
+}
+function isAppClosed() {
+  return !!state.settings && state.settings.appEnabled === false;
+}
+function closedMessage() {
+  return (state.settings && state.settings.appDisabledMessage) || 'অ্যাপটি সাময়িকভাবে বন্ধ আছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+}
+function renderClosedBanner(path) {
+  let el = document.getElementById('closedBanner');
+  if (!isAppClosed() || path === 'admin' || path === 'invoice') {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'closedBanner';
+    el.className = 'closed-banner';
+    APP.parentNode.insertBefore(el, APP);
+  }
+  el.innerHTML = `
+    <div class="cb-icon">⛔</div>
+    <div>
+      <div class="cb-title">অ্যাপ এখন বন্ধ আছে</div>
+      <div class="cb-msg">${escapeHtml(closedMessage())}</div>
+      <div class="cb-sub">এই সময়ে নতুন অর্ডার নেওয়া যাচ্ছে না। আপনি চাইলে পণ্য দেখতে পারবেন।</div>
+    </div>`;
+}
+
 async function router() {
   const hash = location.hash || '#/shop';
   const [path, ...rest] = hash.slice(2).split('/');
   const key = '/' + path;
+  renderClosedBanner(path);
+  refreshAppStatus().then(() => renderClosedBanner(path)).catch(() => {});
   updateBottomNav(path);
   updateAdminViewSwitch(path);
   if (path !== 'admin') APP.classList.remove('admin-active');
@@ -1079,6 +1115,7 @@ function rerenderProductCard(card, id) {
 /* ================= CART ================= */
 route('/cart', async () => {
   await ensureProductsCached(Object.keys(state.cart));
+  try { await refreshAppStatus(true); } catch (e) { /* ignore */ }
   if (!state.settings || !state.settings.minOrderAmount) {
     state.settings = await api('/settings', { auth: false });
   }
@@ -1123,12 +1160,21 @@ function renderCart() {
           ⚠️ সর্বনিম্ন অর্ডার মূল্য ${money(minOrderAmount)}। আরও ${money(minOrderAmount - total)} টাকার পণ্য যোগ করুন।
         </div>
       ` : ''}
+      ${isAppClosed() ? `
+        <div class="closed-banner" style="margin:0 0 12px;">
+          <div class="cb-icon">⛔</div>
+          <div>
+            <div class="cb-title">এখন অর্ডার করা যাবে না</div>
+            <div class="cb-msg">${escapeHtml(closedMessage())}</div>
+          </div>
+        </div>
+      ` : ''}
       <div class="card">
         <label>ডেলিভারি ঠিকানা (ঐচ্ছিক - খালি রাখলে প্রোফাইলের ঠিকানা ব্যবহার হবে)</label>
         <textarea id="deliveryAddress" rows="2"></textarea>
         <label>নোট (ঐচ্ছিক)</label>
         <textarea id="orderNote" rows="2" placeholder="বিশেষ কোনো নির্দেশনা থাকলে লিখুন"></textarea>
-        <button class="btn btn-primary btn-block" id="placeOrderBtn" style="margin-top:14px;" ${belowMin ? 'disabled' : ''}>${t('checkout')}</button>
+        <button class="btn btn-primary btn-block" id="placeOrderBtn" style="margin-top:14px;" ${belowMin || isAppClosed() ? 'disabled' : ''}>${isAppClosed() ? '⛔ অ্যাপ বন্ধ — অর্ডার করা যাচ্ছে না' : t('checkout')}</button>
       </div>
     `}
   `;
@@ -1171,6 +1217,10 @@ function renderCart() {
         toast(err.message);
         placeBtn.disabled = false;
         placeBtn.textContent = t('checkout');
+        if (err.status === 403) {
+          // maybe the admin just closed the app — re-check so the page explains it clearly
+          refreshAppStatus(true).then(() => { renderClosedBanner('cart'); if (isAppClosed()) renderCart(); }).catch(() => {});
+        }
       }
     });
   }
@@ -3459,6 +3509,9 @@ async function renderAdminSettings(box) {
           <span class="switch-slider"></span>
         </label>
       </div>
+      <label style="margin-top:12px;">অ্যাপ বন্ধ থাকলে কাস্টমারদের যে বার্তা দেখাবে</label>
+      <textarea id="s_appDisabledMessage" rows="2">${escapeHtml(s.appDisabledMessage || '')}</textarea>
+      <button class="btn btn-outline btn-sm" id="saveClosedMsgBtn" style="margin-top:8px;">বার্তা সংরক্ষণ করুন</button>
     </div>
 
     <div class="card">
@@ -3488,7 +3541,18 @@ async function renderAdminSettings(box) {
   document.getElementById('s_appEnabled').addEventListener('change', async (e) => {
     try {
       await api('/settings', { method: 'PUT', body: { appEnabled: e.target.checked } });
-      toast(e.target.checked ? 'অ্যাপ চালু করা হয়েছে' : 'অ্যাপ বন্ধ করা হয়েছে');
+      toast(e.target.checked ? 'অ্যাপ চালু করা হয়েছে' : 'অ্যাপ বন্ধ করা হয়েছে — কাস্টমাররা বন্ধের নোটিস দেখবে');
+      lastStatusFetch = 0;
+    } catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+  });
+
+  document.getElementById('saveClosedMsgBtn').addEventListener('click', async () => {
+    const msg = document.getElementById('s_appDisabledMessage').value.trim();
+    if (!msg) { toast('বার্তা ফাঁকা রাখা যাবে না'); return; }
+    try {
+      await api('/settings', { method: 'PUT', body: { appDisabledMessage: msg } });
+      toast('বার্তা সংরক্ষণ হয়েছে');
+      lastStatusFetch = 0;
     } catch (err) { toast(err.message); }
   });
 
