@@ -19,6 +19,7 @@ function generateOrderNo() {
 router.post('/', customerAuth, async (req, res) => {
   try {
     const settings = await AppSettings.findOne({ key: 'main' });
+    console.log('New order attempt | appEnabled =', settings ? settings.appEnabled : '(no settings yet)');
     if (settings && settings.appEnabled === false) {
       return res.status(403).json({ message: settings.appDisabledMessage || 'অ্যাপ বন্ধ আছে, এখন অর্ডার করা যাবে না' });
     }
@@ -189,6 +190,11 @@ router.put('/:id/edit', flexibleAuth, async (req, res) => {
     if (!order) return res.status(404).json({ message: 'অর্ডার পাওয়া যায়নি' });
 
     if (req.role === 'customer') {
+      // while the app is switched off, customers can't change orders either (admin still can)
+      const appSettings = await AppSettings.findOne({ key: 'main' });
+      if (appSettings && appSettings.appEnabled === false) {
+        return res.status(403).json({ message: appSettings.appDisabledMessage || 'অ্যাপ বন্ধ আছে, এখন অর্ডার করা যাবে না' });
+      }
       if (String(order.customer) !== String(req.customer._id)) {
         return res.status(403).json({ message: 'অনুমতি নেই' });
       }
