@@ -9,7 +9,7 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
   });
 }
-const APP_VERSION = '2026.11.01-a';
+const APP_VERSION = '2026.11.01-b';
 
 // "Something looks old / stuck" button: wipes every cache and service worker, then reloads.
 async function hardRefreshApp() {
@@ -414,7 +414,9 @@ async function api(path, { method = 'GET', body, auth = true } = {}) {
   const ctrl = new AbortController();
   const abortTimer = setTimeout(() => ctrl.abort(), 60000);
   try {
-    res = await fetch(`/api${path}`, {
+    // GET requests get a unique value on the URL, so no phone/proxy/CDN can ever hand back an old copy
+    const bust = method === 'GET' ? `${path.includes('?') ? '&' : '?'}_=${Date.now()}` : '';
+    res = await fetch(`/api${path}${bust}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,

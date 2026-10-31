@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ঔষধ ঘর - ডায়াগনস্টিক</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 14px; background: #f5f6f6; color: #111; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  button { font-size: 15px; padding: 10px 14px; border-radius: 8px; border: 0; background: #0d9488; color: #fff; margin: 4px 6px 10px 0; }
+  button.alt { background: #b91c1c; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; font-size: 12.5px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>ঔষধ ঘর – ডায়াগনস্টিক</h1>
+<p style="font-size:13px;margin:0 0 8px;">নিচের সবকিছুর একটা স্ক্রিনশট (উপর থেকে নিচ পর্যন্ত) পাঠান।</p>
+<button id="runBtn">🔄 আবার চেক করুন</button>
+<button id="resetBtn" class="alt">🧹 ক্যাশ মুছে অ্যাপ খুলুন</button>
+<pre id="out">চেক চলছে...</pre>
+<script>
+const out = document.getElementById('out');
+let lines = [];
+function log(s) { lines.push(s); out.textContent = lines.join('\n\n'); }
+
+async function probe(label, url, opts) {
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url, opts);
+    const ms = Math.round(performance.now() - t0);
+    const h = (n) => r.headers.get(n) || '-';
+    const txt = await r.text();
+    let body = null;
+    try { body = JSON.parse(txt); } catch (e) { /* not json */ }
+    log(`${label}\n  status ${r.status} • ${ms}ms\n  server-date: ${h('date')}\n  age: ${h('age')} • cache-control: ${h('cache-control')}\n  cf-cache-status: ${h('cf-cache-status')} • via: ${h('via')}`);
+    return { body, txt };
+  } catch (e) {
+    log(`${label}\n  ❌ FAILED: ${e.message}`);
+    return null;
+  }
+}
+const firstItems = (body) => {
+  const items = body && (Array.isArray(body) ? body : body.items);
+  return items || [];
+};
+
+async function run() {
+  lines = [];
+  out.textContent = 'চেক চলছে...';
+  const c = navigator.connection || {};
+  log(`📱 ডিভাইস\n  এখন: ${new Date().toString()}\n  online: ${navigator.onLine} • network: ${c.effectiveType || '-'}\n  screen: ${screen.width}x${screen.height}\n  ${navigator.userAgent}`);
+
+  // service worker / caches on this device
+  let sw = 'unsupported';
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    sw = `registrations: ${regs.length}` + regs.map((r) => ` [${(r.active && r.active.scriptURL) || 'none'}]`).join('') + ` • controlling this page: ${navigator.serviceWorker.controller ? 'yes' : 'no'}`;
+  }
+  const keys = window.caches ? await caches.keys() : [];
+  log(`🧰 service worker: ${sw}\n  cache storage: ${keys.length ? keys.join(', ') : 'খালি ✅'}`);
+
+  // which app.js does the server hand out?
+  const appjs = await probe('📄 /app.js (server থেকে)', '/app.js?x=' + Date.now(), { cache: 'no-store' });
+  if (appjs) {
+    const m = appjs.txt.match(/APP_VERSION = '([^']+)'/);
+    log(`  → server-এর app.js সংস্করণ: ${m ? m[1] : 'পাওয়া যায়নি (পুরোনো ফাইল?)'}`);
+  }
+
+  const h = await probe('❤️ /api/health', '/api/health?x=' + Date.now(), { cache: 'no-store' });
+  if (h && h.body) log(`  → server সময়: ${h.body.time}`);
+
+  // same data, asked two different ways — if they differ, something between the phone and server is caching
+  const a = await probe('📦 প্রোডাক্ট (সাধারণ রিকোয়েস্ট)', '/api/products?limit=5');
+  const b = await probe('📦 প্রোডাক্ট (ফ্রেশ রিকোয়েস্ট)', '/api/products?limit=5&_=' + Date.now(), { cache: 'no-store' });
+  const la = firstItems(a && a.body);
+  const lb = firstItems(b && b.body);
+  log('নতুন ৫টি প্রোডাক্ট (ফ্রেশ):\n' + (lb.length ? lb.map((p, i) => `  ${i + 1}. ${p.name} — ${p.createdAt || ''}`).join('\n') : '  (কিছু আসেনি)') + `\n  মোট: ${b && b.body ? b.body.total : '-'}`);
+  const same = la.map((p) => p._id).join() === lb.map((p) => p._id).join();
+  log(same ? '✅ দুই রিকোয়েস্টের ফল এক — মাঝপথে ক্যাশ নেই।' : '⚠️ দুই রিকোয়েস্টের ফল আলাদা — মাঝপথে কোথাও পুরোনো কপি দেওয়া হচ্ছে!');
+}
+
+document.getElementById('runBtn').addEventListener('click', run);
+document.getElementById('resetBtn').addEventListener('click', async () => {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (window.caches) {
+      const ks = await caches.keys();
+      await Promise.all(ks.map((k) => caches.delete(k)));
+    }
+  } catch (e) { /* ignore */ }
+  location.href = '/?fresh=' + Date.now();
+});
+run();
+</script>
+</body>
+</html>
