@@ -6,9 +6,28 @@ const BOTTOM_NAV = document.getElementById('bottomNav');
 /* ---------- PWA: installable app + service worker ---------- */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
   });
 }
+const APP_VERSION = '2026.11.01-a';
+
+// "Something looks old / stuck" button: wipes every cache and service worker, then reloads.
+async function hardRefreshApp() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) { /* ignore */ }
+  location.reload();
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest && e.target.closest('.hardRefreshBtn')) hardRefreshApp();
+});
 let deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
@@ -392,15 +411,22 @@ async function api(path, { method = 'GET', body, auth = true } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (auth && state.token) headers['Authorization'] = `Bearer ${state.token}`;
   let res;
+  const ctrl = new AbortController();
+  const abortTimer = setTimeout(() => ctrl.abort(), 60000);
   try {
     res = await fetch(`/api${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       cache: 'no-store',
+      signal: ctrl.signal,
     });
   } catch (e) {
-    throw new Error('সার্ভারের সাথে সংযোগ হচ্ছে না। ইন্টারনেট দেখে আবার চেষ্টা করুন');
+    throw new Error(e && e.name === 'AbortError'
+      ? 'সার্ভার সাড়া দিচ্ছে না, একটু পর আবার চেষ্টা করুন'
+      : 'সার্ভারের সাথে সংযোগ হচ্ছে না। ইন্টারনেট দেখে আবার চেষ্টা করুন');
+  } finally {
+    clearTimeout(abortTimer);
   }
   let data;
   try { data = await res.json(); } catch (e) { data = {}; }
@@ -571,10 +597,14 @@ function renderClosedBanner(path) {
     </div>`;
 }
 
+let lastRouteAt = Date.now();
+let currentPath = '';
 async function router() {
   const hash = location.hash || '#/shop';
   const [path, ...rest] = hash.slice(2).split('/');
   const key = '/' + path;
+  lastRouteAt = Date.now();
+  currentPath = path;
   renderClosedBanner(path);
   refreshAppStatus().then(() => renderClosedBanner(path)).catch(() => {});
   updateBottomNav(path);
@@ -586,10 +616,25 @@ async function router() {
     await handler(rest);
     updateFloatingBuyBar();
   } catch (err) {
-    APP.innerHTML = `<div class="empty-state">⚠️ ${escapeHtml(err.message)}</div>`;
+    APP.innerHTML = `
+      <div class="empty-state">
+        ⚠️ ${escapeHtml(err.message)}
+        <div style="margin-top:14px;"><button class="btn btn-primary btn-sm" id="retryRouteBtn">🔄 আবার চেষ্টা করুন</button></div>
+        <div style="margin-top:10px;"><button class="btn btn-outline btn-sm" id="hardRefreshBtn">অ্যাপ রিসেট করুন</button></div>
+      </div>`;
+    document.getElementById('retryRouteBtn').addEventListener('click', router);
+    document.getElementById('hardRefreshBtn').addEventListener('click', hardRefreshApp);
   }
 }
 window.addEventListener('hashchange', router);
+
+// An installed app can stay open for days. When the phone brings it back to the foreground
+// after a while, reload the data on the browsing pages so new products/orders show up.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (Date.now() - lastRouteAt < 60000) return;
+  if (['shop', 'products', 'orders'].includes(currentPath)) router();
+});
 
 function updateBottomNav(path) {
   const custViews = ['shop', 'products', 'orders', 'cart', 'profile'];
@@ -1617,6 +1662,8 @@ function renderGuestProfile() {
         </div>
       </div>
       <button class="btn btn-primary btn-block installAppBtn hidden" style="margin-top:14px;">📲 হোম স্ক্রিনে অ্যাপ যোগ করুন</button>
+      <button class="btn btn-outline btn-block hardRefreshBtn" style="margin-top:10px;">🔄 অ্যাপ আপডেট/রিসেট করুন</button>
+      <div class="muted" style="text-align:center; font-size:11.5px; margin-top:6px;">সংস্করণ ${APP_VERSION}</div>
       <div class="card auth-card" style="margin-top:14px;">
         <div class="row-between">
           <span>${t('dark_mode')}</span>
@@ -1708,7 +1755,9 @@ function renderProfile(c, orders = []) {
       </div>
     </div>
 
+    <button class="btn btn-outline btn-block hardRefreshBtn" style="margin-bottom:10px;">🔄 অ্যাপ আপডেট/রিসেট করুন</button>
     <button class="btn btn-danger btn-block" id="logoutBtn">${t('logout')}</button>
+    <div class="muted" style="text-align:center; font-size:11.5px; margin-top:8px;">সংস্করণ ${APP_VERSION}</div>
   `;
 
   document.getElementById('themeToggle').addEventListener('change', (e) => {

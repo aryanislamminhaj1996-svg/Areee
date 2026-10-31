@@ -1,48 +1,23 @@
-const CACHE_NAME = 'oushodghor-v2';
-const CORE_ASSETS = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => {})
-  );
+// This service worker deliberately does NOT cache anything.
+// Old versions cached pages and data on phones, which could leave customers looking at
+// stale products. Now every request goes straight to the server, so what you see is
+// always live. The empty fetch handler keeps the app installable ("Add to Home screen").
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
-// New version: delete every older cache so phones never keep serving old files.
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    // wipe every cache left behind by the older versions
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+    await self.clients.claim();
+    // phones that had old caches: reload the open page once so it picks up the new files
+    if (keys.length) {
+      const wins = await self.clients.matchAll({ type: 'window' });
+      wins.forEach((w) => { try { w.navigate(w.url); } catch (e) { /* ignore */ } });
+    }
+  })());
 });
 
-// Network-first for the app files; the cache is only a fallback when the device is offline.
-// API calls are never cached or replayed by the service worker, so data (products, prices,
-// orders) is always live and a stale copy can't hide a failed request.
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
-
-  const network = req.mode === 'navigate' ? fetch(req) : fetch(req, { cache: 'no-cache' });
-  event.respondWith(
-    network
-      .then((res) => {
-        if (res && res.ok) {
-          const resClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone)).catch(() => {});
-        }
-        return res;
-      })
-      .catch(() => caches.match(req))
-  );
-});
+self.addEventListener('fetch', () => {});
