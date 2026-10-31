@@ -391,16 +391,22 @@ function logout() {
 async function api(path, { method = 'GET', body, auth = true } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (auth && state.token) headers['Authorization'] = `Bearer ${state.token}`;
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-    cache: 'no-store',
-  });
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+  } catch (e) {
+    throw new Error('সার্ভারের সাথে সংযোগ হচ্ছে না। ইন্টারনেট দেখে আবার চেষ্টা করুন');
+  }
   let data;
   try { data = await res.json(); } catch (e) { data = {}; }
   if (!res.ok) {
-    const err = new Error(data.message || 'সার্ভার সমস্যা হয়েছে');
+    const waking = [502, 503, 504].includes(res.status);
+    const err = new Error(data.message || (waking ? 'সার্ভার চালু হচ্ছে, ১ মিনিট পর আবার চেষ্টা করুন' : 'সার্ভার সমস্যা হয়েছে'));
     err.status = res.status;
     err.data = data;
     throw err;
@@ -408,16 +414,56 @@ async function api(path, { method = 'GET', body, auth = true } = {}) {
   return data;
 }
 
+// Phone photos are often 4-12 MB. Shrink them in the browser first: the upload is much
+// faster on mobile data, and it never hits the server's file-size limit.
+async function prepareImage(file, folder) {
+  if (!file.type || !file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') return file;
+  if (file.size <= 700 * 1024) return file;
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = url;
+    });
+    URL.revokeObjectURL(url);
+    const MAX = (folder === 'landing-banners' || folder === 'banners') ? 1920 : 1400;
+    const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * scale);
+    const h = Math.round(img.naturalHeight * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const keepPng = folder === 'logo' && file.type === 'image/png';
+    if (!keepPng) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); }
+    ctx.drawImage(img, 0, 0, w, h);
+    const type = keepPng ? 'image/png' : 'image/jpeg';
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.85));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.\w+$/, '') + (keepPng ? '.png' : '.jpg'), { type });
+  } catch (e) {
+    return file;
+  }
+}
+
 async function uploadImage(file, folder) {
+  const ready = await prepareImage(file, folder);
   const form = new FormData();
-  form.append('image', file);
-  const res = await fetch(`/api/upload?folder=${folder}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${state.token}` },
-    body: form,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'আপলোড ব্যর্থ');
+  form.append('image', ready);
+  let res;
+  try {
+    res = await fetch(`/api/upload?folder=${folder}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${state.token}` },
+      body: form,
+    });
+  } catch (e) {
+    throw new Error('সার্ভারের সাথে সংযোগ হচ্ছে না, ছবি আপলোড হয়নি');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'ছবি আপলোড ব্যর্থ হয়েছে, আবার চেষ্টা করুন');
   return data.url;
 }
 
@@ -3540,7 +3586,9 @@ async function renderAdminSettings(box) {
 
   document.getElementById('s_appEnabled').addEventListener('change', async (e) => {
     try {
-      await api('/settings', { method: 'PUT', body: { appEnabled: e.target.checked } });
+      const saved = await api('/settings', { method: 'PUT', body: { appEnabled: e.target.checked } });
+      // confirm the server really stored the new value
+      if ((saved.appEnabled !== false) !== e.target.checked) throw new Error('সেভ হয়নি, আবার চেষ্টা করুন');
       toast(e.target.checked ? 'অ্যাপ চালু করা হয়েছে' : 'অ্যাপ বন্ধ করা হয়েছে — কাস্টমাররা বন্ধের নোটিস দেখবে');
       lastStatusFetch = 0;
     } catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
