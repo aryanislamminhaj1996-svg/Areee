@@ -4,6 +4,10 @@ const cors = require('cors');
 const path = require('path');
 const connectDB = require('./config/db');
 
+// A single failed request must never take the whole server down.
+process.on('unhandledRejection', (err) => console.error('Unhandled rejection:', err && err.message ? err.message : err));
+process.on('uncaughtException', (err) => console.error('Uncaught exception:', err && err.message ? err.message : err));
+
 const app = express();
 
 app.use(cors());
@@ -57,6 +61,13 @@ app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(publicDir, 'index.html'));
+});
+
+// Last-resort error handler: always answer with JSON, never an HTML error page.
+app.use((err, req, res, next) => {
+  console.error('Server error:', err && err.message ? err.message : err);
+  if (res.headersSent) return next(err);
+  res.status(err && err.status ? err.status : 500).json({ message: 'সার্ভারে সমস্যা হয়েছে, আবার চেষ্টা করুন' });
 });
 
 const PORT = process.env.PORT || 5000;
