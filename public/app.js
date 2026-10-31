@@ -841,7 +841,8 @@ function renderShop(newestBatch, deals, announcements, recentlyPurchased, active
     const carousel = document.getElementById('bannerCarousel');
     const dots = document.querySelectorAll('#bannerDots .dot');
     let idx = 0;
-    setInterval(() => {
+    const bannerTimer = setInterval(() => {
+      if (!document.body.contains(carousel)) { clearInterval(bannerTimer); return; }
       idx = (idx + 1) % activeBanners.length;
       carousel.scrollTo({ left: carousel.clientWidth * idx, behavior: 'smooth' });
       dots.forEach((d, i) => d.classList.toggle('active', i === idx));
@@ -2740,13 +2741,21 @@ function openProductForm(product, companies, box, onDone) {
 
 /* ----- Admin: Orders ----- */
 async function renderAdminOrders(box) {
-  const allOrders = await api('/orders');
+  let allOrders = await api('/orders');
+  let openLabels = null;               // day folders the admin has open (so a refresh doesn't close them)
+  const seenIds = new Set(allOrders.map((o) => o._id));
+  const orderSignature = (list) => list.map((o) => `${o._id}:${o.status}:${o.total}:${o.items.length}:${o.updatedAt || ''}`).join('|');
+  let lastSig = orderSignature(allOrders);
+  let refreshing = false;
   const statusLabel = {
     pending: t('status_pending'), confirmed: t('status_confirmed'), processing: t('status_processing'),
     shipped: t('status_shipped'), delivered: t('status_delivered'), cancelled: t('status_cancelled'),
   };
   let showCancelled = false;
-  const cancelledCount = allOrders.filter((o) => o.status === 'cancelled').length;
+  const cancelledPill = () => {
+    const n = allOrders.filter((o) => o.status === 'cancelled').length;
+    return n ? `<span class="pill pill-blocked" style="margin-left:4px;">${n}${t('cancelled_count_suffix')}</span>` : '';
+  };
 
   function orderCard(o) {
     return `
@@ -2777,10 +2786,13 @@ async function renderAdminOrders(box) {
   }
 
   box.innerHTML = `
-    <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:13.5px; margin-bottom:12px;">
-      <input type="checkbox" id="showCancelledFilter" style="width:auto;">
-      ${t('show_cancelled_orders')} ${cancelledCount ? `<span class="pill pill-blocked" style="margin-left:4px;">${cancelledCount}${t('cancelled_count_suffix')}</span>` : ''}
-    </label>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px;">
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; font-size:13.5px; margin:0;">
+        <input type="checkbox" id="showCancelledFilter" style="width:auto;">
+        ${t('show_cancelled_orders')} <span id="cancelledPillBox">${cancelledPill()}</span>
+      </label>
+      <button class="btn btn-outline btn-sm" id="refreshOrdersBtn" aria-label="রিফ্রেশ">🔄</button>
+    </div>
     <div id="orderListBody">
       ${renderOrderGroups(currentList())}
     </div>
@@ -2793,7 +2805,8 @@ async function renderAdminOrders(box) {
         try {
           await api(`/orders/${id}/status`, { method: 'PATCH', body: { status: e.target.value } });
           toast(t('toast_order_status_updated'));
-          renderAdminOrders(box);
+          lastSig = '';
+          await refreshOrders(false);
         } catch (err) { toast(err.message); }
       });
     });
@@ -2806,10 +2819,58 @@ async function renderAdminOrders(box) {
     wireCardEvents();
   });
 
+  // Live refresh: new orders appear on their own (every 20s, and whenever the app comes back
+  // to the foreground), without the admin having to reload the page.
+  async function refreshOrders(manual) {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const fresh = await api('/orders');
+      const sig = orderSignature(fresh);
+      if (sig !== lastSig) {
+        const newOnes = fresh.filter((o) => !seenIds.has(o._id));
+        openLabels = new Set([...document.querySelectorAll('#orderListBody details.day-folder[open]')].map((d) => d.dataset.label));
+        const y = window.scrollY;
+        allOrders = fresh;
+        lastSig = sig;
+        fresh.forEach((o) => seenIds.add(o._id));
+        document.getElementById('orderListBody').innerHTML = renderOrderGroups(currentList());
+        document.getElementById('cancelledPillBox').innerHTML = cancelledPill();
+        wireCardEvents();
+        window.scrollTo(0, y);
+        if (newOnes.length) toast(`🆕 ${newOnes.length}টি নতুন অর্ডার এসেছে`);
+        else if (manual) toast('আপডেট হয়েছে');
+      } else if (manual) {
+        toast('নতুন কোনো অর্ডার নেই');
+      }
+    } catch (e) {
+      if (manual) toast(e.message);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  document.getElementById('refreshOrdersBtn').addEventListener('click', () => refreshOrders(true));
+
+  if (window.__ordersCleanup) window.__ordersCleanup();
+  const ordersTick = () => {
+    if (!document.getElementById('orderListBody')) { window.__ordersCleanup(); return; } // left the Orders tab
+    if (document.hidden) return;
+    if (document.activeElement && document.activeElement.classList.contains('statusSelect')) return; // don't close an open dropdown
+    refreshOrders(false);
+  };
+  const ordersTimer = setInterval(ordersTick, 20000);
+  document.addEventListener('visibilitychange', ordersTick);
+  window.__ordersCleanup = () => {
+    clearInterval(ordersTimer);
+    document.removeEventListener('visibilitychange', ordersTick);
+    window.__ordersCleanup = null;
+  };
+
   function renderOrderGroups(list) {
     if (list.length === 0) return `<div class="empty-state">${t('no_orders_found')}</div>`;
     return groupOrdersByDay(list).map((g, i) => `
-      <details class="day-folder" ${i === 0 ? 'open' : ''}>
+      <details class="day-folder" data-label="${escapeHtml(g.label)}" ${(i === 0 || (openLabels && openLabels.has(g.label))) ? 'open' : ''}>
         <summary class="day-folder-label">
           <span>📁 ${g.label} <span class="day-folder-count">${g.orders.length}${t('orders_count_suffix')}</span></span>
         </summary>
